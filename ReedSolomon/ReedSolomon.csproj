@@ -11,7 +11,7 @@
 		<GeneratePackageOnBuild>False</GeneratePackageOnBuild>
 		<Authors>zms9110750</Authors>
 		<PackageProjectUrl>https://github.com/zms9110750/zms9110750Library</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/zms9110750/zms9110750Library</RepositoryUrl>
+		<RepositoryUrl>https://github.com/zms9110750/ReedSolomon</RepositoryUrl>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<Version>0.2.0</Version>
 		<Title>ReedSolomon冗余算法</Title>
