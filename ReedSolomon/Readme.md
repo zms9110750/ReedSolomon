@@ -20,99 +20,124 @@
 | `IMatrix` | 矩阵接口，提供编解码核心方法 |
 
 ## 快速开始
+
+### 快捷使用(仅限netstandard2.1 以上)
+```csharp
+string path = "X:\\共享目录\\英雄联盟原画\\lux_splash_uncentered_7.jpg";
+string outputPath = path.Replace("\\共享目录", ""); 
+int paritycount = 6;
+int originalCount = 3;
+
+// ==================== 快捷编码 ====================
+await ReedSolomon.EncodeFileAsync(
+    path,
+    Enumerable.Range(originalCount, paritycount).Select(s => $"{outputPath}.shard_{s}"),
+    dataShards: originalCount,
+    overwrite: true);
+
+// ==================== 快捷解码 ====================
+await ReedSolomon.DecodeFileAsync(
+    Enumerable.Range(3, paritycount).Select(s => KeyValuePair.Create(s, $"{outputPath}.shard_{s}")).ToDictionary(),
+    outputPath + ".recovered.jpg",
+    dataShards: originalCount,
+    parityShards: paritycount,
+    originalFileSize: new FileInfo(path).Length
+    );
+```
  
 ### 数组编解码
 
 ```csharp
-// ==================== 数组编码 ====================
-int dataShards = 3;
-int parityShards = 2;
-int blockSize = 4096;
-
-byte[] original = File.ReadAllBytes("input.bin");
-var matrix = new VandermondeMatrix8bit(dataShards, parityShards);
-
-int chunkSize = dataShards * blockSize;
-int totalChunks = (original.Length + chunkSize - 1) / chunkSize;
-byte[][] parityShardsData = new byte[parityShards][];
-for (int i = 0; i < parityShards; i++)
-    parityShardsData[i] = new byte[totalChunks * blockSize];
-
-for (int chunk = 0; chunk < totalChunks; chunk++)
+VandermondeMatrix8bit matrix8Bit = new VandermondeMatrix8bit(3, 6);
+byte[][] original = new byte[3][]
 {
-    byte[] input = new byte[chunkSize];
-    int offset = chunk * chunkSize;
-    int len = Math.Min(chunkSize, original.Length - offset);
-    Array.Copy(original, offset, input, 0, len);
-
-    byte[] output = new byte[parityShards * blockSize];
-    matrix.CodeShards(input, output, blockSize);
-
-    for (int i = 0; i < parityShards; i++)
-        Array.Copy(output, i * blockSize, parityShardsData[i], chunk * blockSize, blockSize);
+    new byte[] { 1, 2, 3, 4, 5 },
+    new byte[] { 6, 7, 8, 9, 10 },
+    new byte[] { 11, 12, 13, 14, 15 }
+};
+byte[][] parity = new byte[6][];
+for (int i = 0; i < parity.Length; i++)
+{
+    parity[i] = new byte[original[0].Length];
 }
 
-for (int i = 0; i < parityShards; i++)
-    File.WriteAllBytes($"parity_{i}.bin", parityShardsData[i]);
+// ==================== 数组编码 ====================
+{
+    matrix8Bit.CodeShards(original, parity, 0, original[0].Length);
+}
+
+// ==================== 随机选取部分分片 ============
+int[] availableIndex;
+byte[][] availableShards;
+{
+    Random rand = new Random(42);
+    int[] all = Enumerable.Range(0, original.Length + parity.Length).ToArray();
+    var available = original.Concat(parity).Zip(all).OrderBy(_ => rand.Next()).Take(original.Length).ToDictionary();
+    availableIndex = available.Values.ToArray();
+    availableShards = available.Keys.ToArray();
+}
 
 // ==================== 数组解码 ====================
-int[] availableIndices = { 1, 2 };
-var recoveryMatrix = matrix.InverseRows(availableIndices);
-
-byte[][] availableShards = availableIndices.Select(i => File.ReadAllBytes($"shard_{i}.bin")).ToArray();
-int shardLength = availableShards[0].Length;
-int chunks = shardLength / blockSize;
-byte[] recovered = new byte[chunks * chunkSize];
-
-for (int chunk = 0; chunk < chunks; chunk++)
 {
-    byte[] input = new byte[dataShards * blockSize];
-    for (int i = 0; i < availableShards.Length; i++)
-        Array.Copy(availableShards[i], chunk * blockSize, input, i * blockSize, blockSize);
+    var inverse = matrix8Bit.InverseRows(availableIndex);
+    byte[][] recovery = new byte[original.Length][];
+    for (int i = 0; i < recovery.Length; i++)
+    {
+        recovery[i] = new byte[original[0].Length];
+    }
 
-    byte[] output = new byte[dataShards * blockSize];
-    recoveryMatrix.CodeShards(input, output, blockSize);
-    Array.Copy(output, 0, recovered, chunk * chunkSize, chunkSize);
+    inverse.CodeShards(availableShards, recovery, 0, original[0].Length); 
+    foreach (var item in recovery)
+    {
+        foreach (var item2 in item)
+        {
+            Console.WriteLine(item2);
+        }
+    }
 }
-
-File.WriteAllBytes("recovered.bin", recovered.Take(original.Length).ToArray());
 ``` 
-
 
 ### 流编解码
 
 ```csharp
-// ==================== 流式编码 ====================
-var dataStreams = Enumerable.Range(0, dataShards).Select(i => File.Create($"data_{i}.bin")).ToArray();
-var parityStreams = Enumerable.Range(0, parityShards).Select(i => File.Create($"parity_{i}.bin")).ToArray();
-var dataRoundRobin = new StreamRoundRobin(dataStreams, blockSize);
 
-using var encodeStream = new ReedSolomonEncodeStream(matrix, parityStreams, dataRoundRobin);
-using var inputStream = File.OpenRead("input.bin");
-await inputStream.CopyToAsync(encodeStream);
+string path = "X:\\共享目录\\英雄联盟原画\\lux_splash_uncentered_8.jpg";
+string outputPath = path.Replace("\\共享目录", "");
+int segmen = 1;
+int paritycount = 6;
+int originalCount = 3;
+
+VandermondeMatrix8bit matrix8Bit = new VandermondeMatrix8bit(originalCount, paritycount);
+// ==================== 流式编码 ====================
+
+{
+
+    var output = Enumerable.Range(0, originalCount + paritycount).Select(s => File.Create($"{outputPath}.shard_{s}")).ToArray();
+
+    await using var parity = new StreamRoundRobin(output.Skip(originalCount), segmen);
+    await using var original = new StreamRoundRobin(output.Take(originalCount), segmen);
+    await using var encodeStream = new ReedSolomonEncodeStream(matrix8Bit, parity, original);
+
+    using var inputStream = File.OpenRead(path);
+    await inputStream.CopyToAsync(encodeStream);
+}
 
 // ==================== 流式解码 ====================
-var availableStreams = availableIndices.Select(i => File.OpenRead($"shard_{i}.bin")).ToArray();
-var availableRoundRobin = new StreamRoundRobin(availableStreams, blockSize);
 
-using var decodeStream = new ReedSolomonDecodeStream(recoveryMatrix, availableRoundRobin, original.Length);
-using var outputStream = File.Create("recovered.bin");
-await decodeStream.CopyToAsync(outputStream); 
+{
+    int[]? availableIndices = Enumerable.Range(0, originalCount + paritycount).ToArray();
+    Random.Shared.Shuffle(availableIndices);
+
+    var recoveryMatrix = matrix8Bit.InverseRows(availableIndices.AsSpan().Slice(0, originalCount));
+    var availableStreams = availableIndices.Take(originalCount).Select(s => File.Open($"{outputPath}.shard_{s}", FileMode.Open)).ToArray();
+    using var availableRoundRobin = new StreamRoundRobin(availableStreams, segmen);
+    using var outputStream = File.Create(outputPath);
+    using var decodeStream = new ReedSolomonDecodeStream(recoveryMatrix, availableRoundRobin, new FileInfo(path).Length);
+    await decodeStream.CopyToAsync(outputStream);
+    Console.WriteLine(decodeStream.Position);
+    Console.WriteLine(outputStream.Position);
+}
 ```
-
-### StreamRoundRobin
-
-```csharp
-// 将多个流包装为一个连续流
-var streams = new Stream[] { stream0, stream1, stream2 };
-var roundRobin = new StreamRoundRobin(streams, blockSize);
-
-// 写入：轮流写入每个流（每个流写 blockSize 字节）
-roundRobin.Write(buffer);
-
-// 读取：轮流从每个流读取
-roundRobin.Read(buffer);
-``` 
 
 ## 参数说明
 

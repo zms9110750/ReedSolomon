@@ -1,10 +1,9 @@
 ﻿
 using System.Buffers;
+using System.Diagnostics;
 using System.IO.Pipelines;
 
 namespace zms9110750.ReedSolomon.Streams;
-
-
 /// <summary>
 /// Reed-Solomon 解码流
 /// </summary>
@@ -15,6 +14,9 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
 
     /// <summary>是否已释放</summary>
     private bool _disposed;
+
+    /// <summary>释放对象后，true 将流对象保持打开状态;false将一起释放底层流</summary>
+    private bool _leaveOpen;
 
     /// <summary>恢复矩阵</summary>
     private IMatrix RecoveryMatrix { get; }
@@ -71,8 +73,9 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
     /// <param name="allShardStreams">所有分片流（顺序：前K个数据分片，后M个冗余分片）</param>
     /// <param name="blockSize">每个分片的轮询字节数</param>
     /// <param name="length">流的总长度</param>
-    public ReedSolomonDecodeStream(IMatrix recoveryMatrix, IReadOnlyList<Stream> allShardStreams, int blockSize, long length)
-        : this(recoveryMatrix, new StreamRoundRobin(allShardStreams, blockSize), length)
+    /// <param name="leaveOpen">释放对象后，true 将流对象保持打开状态;false将一起释放底层流</param>
+    public ReedSolomonDecodeStream(IMatrix recoveryMatrix, IReadOnlyList<Stream> allShardStreams, int blockSize, long length, bool leaveOpen = false)
+        : this(recoveryMatrix, new StreamRoundRobin(allShardStreams, blockSize), length, leaveOpen)
     {
     }
 
@@ -82,7 +85,8 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
     /// <param name="recoveryMatrix">恢复矩阵（方阵，大小应为 dataShards × dataShards）</param>
     /// <param name="allShardStreams">所有分片流（顺序：前K个数据分片，后M个冗余分片）</param>
     /// <param name="length">流的总长度</param>
-    public ReedSolomonDecodeStream(IMatrix recoveryMatrix, StreamRoundRobin allShardStreams, long length)
+    /// <param name="leaveOpen">释放对象后，true 将流对象保持打开状态;false将一起释放底层流</param>
+    public ReedSolomonDecodeStream(IMatrix recoveryMatrix, StreamRoundRobin allShardStreams, long length, bool leaveOpen = false)
     {
         if (recoveryMatrix == null)
         {
@@ -100,14 +104,14 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
         {
             throw new ArgumentException($"分片流数量应为 {recoveryMatrix.Rows}，实际 {allShardStreams.StreamsCount}", nameof(allShardStreams));
         }
-
+        _leaveOpen = leaveOpen;
         DataShards = recoveryMatrix.Rows;
         BlockSize = allShardStreams.SegmentSize;
         RecoveryMatrix = recoveryMatrix;
         AllShardStreams = allShardStreams;
         AllShardReader = PipeReader.Create(AllShardStreams);
         Length = length;
-        Pipe = new Pipe();
+        Pipe = new Pipe(new PipeOptions(minimumSegmentSize: Math.Min(Math.Max(ChunkSize, 4096), 65536), pauseWriterThreshold: 0));
         PipeStream = Pipe.Writer.AsStream();
     }
 
@@ -202,22 +206,30 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
         }
 
         byte[] poolBuffer = ArrayPool<byte>.Shared.Rent(ChunkSize << 1);
-
+        var remainLength = RemainLength;
         try
         {
-            int bytesRead = 0;
+
             Memory<byte> outputMemory = poolBuffer.AsMemory(0, ChunkSize);
             Memory<byte> inputBufferMemory = poolBuffer.AsMemory(ChunkSize, ChunkSize);
             while (true)
             {
+
                 if (PipeReader.TryRead(out var readResult))
                 {
                     if (readResult.Buffer.Length >= buffer.Length)
                     {
                         var data = readResult.Buffer.Slice(0, buffer.Length);
-                        data.CopyTo(buffer.Span);
-                        PipeReader.AdvanceTo(data.End);
-                        return buffer.Length;
+                        try
+                        {
+                            data.CopyTo(buffer.Span);
+                            _position += data.Length;
+                            return buffer.Length;
+                        }
+                        finally
+                        {
+                            PipeReader.AdvanceTo(data.End);
+                        }
                     }
                     else
                     {
@@ -236,7 +248,7 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
                     case { integrity: true, IsSingleSegment: true }:
                         chunkMemory = shardBuffer.First;
                         break;
-                    case { integrity: false } when shardBuffer.Length < RemainLength:
+                    case { integrity: false } when shardBuffer.Length < remainLength:
                         throw new EndOfStreamException("分片流过早结束，无法读取足够的数据进行解码");
                     case { integrity: false }:
                         inputBufferMemory.Span.Clear();
@@ -249,10 +261,9 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
 
                 RecoveryMatrix.CodeShards(chunkMemory.Span, outputMemory.Span, BlockSize);
                 await PipeStream.WriteAsync(outputMemory, cancellationToken).ConfigureAwait(false);
+
+                remainLength -= (int)Math.Min(remainLength, shardBuffer.Length);
                 AllShardReader.AdvanceTo(shardBuffer.End);
-                int bytesToAdvance = (int)Math.Min(RemainLength, shardBuffer.Length);
-                _position += bytesToAdvance;
-                bytesRead += bytesToAdvance;
             }
         }
         finally
@@ -269,9 +280,11 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
     /// <inheritdoc/>
     protected override void Dispose(bool disposing)
     {
-        if (!_disposed && disposing)
+        if (!_disposed && disposing && !_leaveOpen)
         {
-            // 不关闭底层流，由调用方管理
+            AllShardStreams.Dispose();
+            Pipe.Writer.Complete();
+            PipeReader.Complete(); 
         }
         _disposed = true;
         base.Dispose(disposing);
@@ -298,5 +311,4 @@ public class ReedSolomonDecodeStream : SpanCapableStreamBase
     {
         throw new NotSupportedException();
     }
-
 }

@@ -2,7 +2,6 @@
 using System.Collections.Immutable;
 
 namespace zms9110750.ReedSolomon.Matrixs;
-
 /// <summary>
 /// 矩阵扩展方法，提供解码（分片恢复）功能
 /// </summary>
@@ -163,12 +162,12 @@ public static class MatrixExtensions
     /// <exception cref="ArgumentException">当分片数量不足或长度不足时抛出</exception>
     public static void RecoverDataShards(
         this IMatrix<byte> encodingMatrix,
-        IEnumerable<IReadOnlyList<byte>> availableShards,
+        IEnumerable<IList<byte>> availableShards,
         IEnumerable<IList<byte>> recoveredDataShards,
         ReadOnlySpan<int> availableRowIndices,
         int offset,
         int count)
-    { 
+    {
 
         // 验证 offset 和 count
         if (offset < 0)
@@ -189,14 +188,14 @@ public static class MatrixExtensions
         }
 
         // 将可用分片转为列表并验证数量
-        var availableList = availableShards as IReadOnlyList<IReadOnlyList<byte>> ?? availableShards?.ToImmutableList() ?? throw new ArgumentNullException(nameof(availableShards));
+        var availableList = availableShards as IReadOnlyList<IList<byte>> ?? availableShards?.ToImmutableList() ?? throw new ArgumentNullException(nameof(availableShards));
         if (availableList.Count != dataShardCount)
         {
             throw new ArgumentException($"availableShards 数量应为 {dataShardCount}，实际 {availableList.Count}", nameof(availableShards));
         }
 
         // 将缺失分片转为列表并验证数量
-        var missingList = recoveredDataShards as IReadOnlyList<IList<byte>> ?? recoveredDataShards?.ToImmutableList()?? throw new ArgumentNullException(nameof(recoveredDataShards));
+        var missingList = recoveredDataShards as IReadOnlyList<IList<byte>> ?? recoveredDataShards?.ToImmutableList() ?? throw new ArgumentNullException(nameof(recoveredDataShards));
         if (missingList.Count != dataShardCount)
         {
             throw new ArgumentException(

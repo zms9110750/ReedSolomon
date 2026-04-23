@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
+		<TargetFrameworks>netstandard2.0;netstandard2.1;net9.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
@@ -13,29 +13,22 @@
 		<PackageProjectUrl>https://github.com/zms9110750/zms9110750Library</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/zms9110750/zms9110750Library</RepositoryUrl>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<Version>0.1.0</Version>
+		<Version>0.2.0</Version>
 		<Title>ReedSolomon冗余算法</Title>
 		<Description>Reed-Solomon Erasure Coding in C#/.NET. Support streaming, memory pool, large files.</Description>
-		<PackageReleaseNotes>rs冗余算法。可以使用流处理。</PackageReleaseNotes>
+		<PackageReleaseNotes>修bug。修很多很多bug。
+
+rs冗余算法。可以使用流处理。</PackageReleaseNotes>
 		<PackageTags>reedsolomon erasure coding shard parity storage streaming</PackageTags>
 		<PackageOutputPath>C:\Users\16229\source\NugetPack</PackageOutputPath>
-		<PackageReadmeFile>Readme.md</PackageReadmeFile> 
+		<PackageReadmeFile>Readme.md</PackageReadmeFile>
 	</PropertyGroup>
-
+ 
 	<ItemGroup>
-	  <None Include="..\..\AllReference\Readme.md">
-	    <Pack>True</Pack>
-	    <PackagePath>\</PackagePath>
-	  </None>
+		<PackageReference Include="System.Collections.Immutable" Version="6.0.0" Condition="$(TargetFramework.StartsWith('netstandard'))" />
+		<PackageReference Include="System.IO.Pipelines" Version="6.0.0" Condition="$(TargetFramework.StartsWith('netstandard'))" />
+
 	</ItemGroup>
 
-	
-	
-	<ItemGroup> 
-		<PackageReference Include="System.Collections.Immutable" Version="6.0.0" Condition="$(TargetFramework.StartsWith('netstandard'))" />
-		<PackageReference Include="System.IO.Pipelines" Version="6.0.0"  Condition="$(TargetFramework.StartsWith('netstandard'))" /> 
-		 
-	</ItemGroup> 
-	
 
 </Project>
